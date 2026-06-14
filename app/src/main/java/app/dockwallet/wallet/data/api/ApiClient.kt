@@ -13,6 +13,8 @@ object TokenStore {
     private const val KEY_TOKEN = "jwt_token"
     private const val KEY_SERVER_URL = "server_url"
 
+    private const val KEY_ONBOARDING_DONE = "onboarding_done"
+
     private fun prefs(context: Context) = EncryptedSharedPreferences.create(
         context,
         PREF_FILE,
@@ -36,6 +38,15 @@ object TokenStore {
 
     fun saveServerUrl(context: Context, url: String) =
         prefs(context).edit().putString(KEY_SERVER_URL, url).apply()
+
+    fun saveOnboardingDone(context: Context) =
+        prefs(context).edit().putBoolean(KEY_ONBOARDING_DONE, true).apply()
+
+    fun isOnboardingDone(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ONBOARDING_DONE, false)
+
+    fun isLocalMode(context: Context): Boolean =
+        getServerUrl(context) == "local"
 }
 
 object ApiClient {

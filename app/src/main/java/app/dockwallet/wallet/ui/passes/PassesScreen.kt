@@ -15,12 +15,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.dockwallet.wallet.data.api.BoardingPass
+import app.dockwallet.wallet.data.BoardingPassEntity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PassesScreen(
-    onPassClick: (BoardingPass) -> Unit,
+    onPassClick: (BoardingPassEntity) -> Unit,
     onLogout: () -> Unit,
     viewModel: PassesViewModel = viewModel()
 ) {
@@ -31,6 +31,21 @@ fun PassesScreen(
             TopAppBar(
                 title = { Text("DockWallet", fontWeight = FontWeight.Bold) },
                 actions = {
+                    if (!uiState.isLocalMode) {
+                        IconButton(
+                            onClick = viewModel::sync,
+                            enabled = !uiState.isSyncing
+                        ) {
+                            if (uiState.isSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Sync, contentDescription = "Synchronisieren")
+                            }
+                        }
+                    }
                     IconButton(onClick = {
                         viewModel.logout()
                         onLogout()
@@ -68,7 +83,7 @@ fun PassesScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(uiState.error!!, color = MaterialTheme.colorScheme.error)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = viewModel::loadPasses) {
+                        Button(onClick = viewModel::sync) {
                             Text("Erneut versuchen")
                         }
                     }
@@ -118,7 +133,7 @@ fun PassesScreen(
 }
 
 @Composable
-fun BoardingPassCard(pass: BoardingPass, onClick: () -> Unit) {
+fun BoardingPassCard(pass: BoardingPassEntity, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -139,7 +154,9 @@ fun BoardingPassCard(pass: BoardingPass, onClick: () -> Unit) {
                 Icon(
                     imageVector = Icons.Default.Flight,
                     contentDescription = null,
-                    modifier = Modifier.padding(horizontal = 8.dp).size(20.dp),
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp)
+                        .size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
@@ -150,7 +167,7 @@ fun BoardingPassCard(pass: BoardingPass, onClick: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
-                    text = pass.flight_number,
+                    text = pass.flightNumber,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -159,7 +176,7 @@ fun BoardingPassCard(pass: BoardingPass, onClick: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = pass.passenger_name,
+                text = pass.passengerName,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -171,13 +188,13 @@ fun BoardingPassCard(pass: BoardingPass, onClick: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 pass.seat?.let { LabeledValue("Sitz", it) }
                 pass.gate?.let { LabeledValue("Gate", it) }
-                pass.booking_reference?.let { LabeledValue("Buchung", it) }
+                pass.bookingReference?.let { LabeledValue("Buchung", it) }
             }
 
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = pass.departure_time.replace("T", " ").take(16),
+                text = pass.departureTime.replace("T", " ").take(16),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
