@@ -19,10 +19,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.dockwallet.wallet.R
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
+
+    val context = LocalContext.current
+    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+    val versionName = packageInfo.versionName
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -68,7 +74,7 @@ fun AboutScreen(onBack: () -> Unit) {
             )
 
             Text(
-                text = "Version 1.0.0",
+                text = "Version $versionName",
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
