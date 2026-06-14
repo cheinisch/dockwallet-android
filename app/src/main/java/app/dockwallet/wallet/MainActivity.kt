@@ -4,44 +4,49 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import app.dockwallet.wallet.ui.theme.WalletTheme
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import app.dockwallet.wallet.data.api.TokenStore
+import app.dockwallet.wallet.ui.login.LoginScreen
+import app.dockwallet.wallet.ui.passes.PassesScreen
+import app.dockwallet.wallet.ui.theme.DockWalletTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val startDestination = if (TokenStore.getToken(this) != null) "passes" else "login"
+
         setContent {
-            WalletTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+            DockWalletTheme {
+                val navController = rememberNavController()
+
+                NavHost(navController = navController, startDestination = startDestination) {
+                    composable("login") {
+                        LoginScreen(
+                            onLoginSuccess = {
+                                navController.navigate("passes") {
+                                    popUpTo("login") { inclusive = true }
+                                }
+                            }
+                        )
+                    }
+                    composable("passes") {
+                        PassesScreen(
+                            onPassClick = { pass ->
+                                // kommt später: navController.navigate("pass/${pass.id}")
+                            },
+                            onLogout = {
+                                navController.navigate("login") {
+                                    popUpTo("passes") { inclusive = true }
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    WalletTheme {
-        Greeting("Android")
     }
 }
