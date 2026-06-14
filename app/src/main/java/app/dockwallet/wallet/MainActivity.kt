@@ -8,9 +8,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import app.dockwallet.wallet.data.api.TokenStore
+import app.dockwallet.wallet.ui.about.AboutScreen
 import app.dockwallet.wallet.ui.login.LoginScreen
 import app.dockwallet.wallet.ui.onboarding.OnboardingScreen
 import app.dockwallet.wallet.ui.passes.PassesScreen
+import app.dockwallet.wallet.ui.settings.SettingsScreen
 import app.dockwallet.wallet.ui.theme.DockWalletTheme
 
 class MainActivity : ComponentActivity() {
@@ -30,18 +32,21 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
 
                 NavHost(navController = navController, startDestination = startDestination) {
+
                     composable("onboarding") {
                         OnboardingScreen(
                             onDone = {
-                                val next = if (TokenStore.getToken(this@MainActivity) != null
-                                    || TokenStore.isLocalMode(this@MainActivity)) "passes"
-                                else "login"
+                                val next = if (
+                                    TokenStore.getToken(this@MainActivity) != null ||
+                                    TokenStore.isLocalMode(this@MainActivity)
+                                ) "passes" else "login"
                                 navController.navigate(next) {
                                     popUpTo("onboarding") { inclusive = true }
                                 }
                             }
                         )
                     }
+
                     composable("login") {
                         LoginScreen(
                             onLoginSuccess = {
@@ -51,6 +56,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+
                     composable("passes") {
                         PassesScreen(
                             onPassClick = { },
@@ -58,7 +64,35 @@ class MainActivity : ComponentActivity() {
                                 navController.navigate("login") {
                                     popUpTo("passes") { inclusive = true }
                                 }
+                            },
+                            onOpenSettings = {
+                                navController.navigate("settings")
                             }
+                        )
+                    }
+
+                    composable("settings") {
+                        SettingsScreen(
+                            onBack = { navController.popBackStack() },
+                            onLogout = {
+                                navController.navigate("login") {
+                                    popUpTo("passes") { inclusive = true }
+                                }
+                            },
+                            onConnectServer = {
+                                navController.navigate("onboarding") {
+                                    popUpTo("passes") { inclusive = false }
+                                }
+                            },
+                            onAbout = {
+                                navController.navigate("about")
+                            }
+                        )
+                    }
+
+                    composable("about") {
+                        AboutScreen(
+                            onBack = { navController.popBackStack() }
                         )
                     }
                 }

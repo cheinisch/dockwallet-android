@@ -2,7 +2,7 @@ package app.dockwallet.wallet.data.repository
 
 import android.content.Context
 import app.dockwallet.wallet.data.AppDatabase
-import app.dockwallet.wallet.data.BoardingPassEntity
+import app.dockwallet.wallet.data.PassEntity
 import app.dockwallet.wallet.data.api.ApiClient
 import app.dockwallet.wallet.data.api.TokenStore
 import kotlinx.coroutines.flow.Flow
@@ -14,12 +14,11 @@ sealed class Result<out T> {
 
 class DockWalletRepository(private val context: Context) {
 
-    private val dao = AppDatabase.getInstance(context).boardingPassDao()
+    private val dao = AppDatabase.getInstance(context).passDao()
     private fun api() = ApiClient.create(TokenStore.getServerUrl(context))
     private fun bearerToken() = "Bearer ${TokenStore.getToken(context)}"
 
-    // Lokaler Stream — UI beobachtet diesen
-    fun getAllPasses(): Flow<List<BoardingPassEntity>> = dao.getAllPasses()
+    fun getAllPasses(): Flow<List<PassEntity>> = dao.getAllPasses()
 
     suspend fun login(username: String, password: String): Result<Unit> {
         return try {
@@ -46,16 +45,27 @@ class DockWalletRepository(private val context: Context) {
             if (response.isSuccessful) {
                 val passes = response.body() ?: emptyList()
                 val entities = passes.map {
-                    BoardingPassEntity(
+                    PassEntity(
                         id = it.id,
+                        passType = it.pass_type,
                         passengerName = it.passenger_name,
                         flightNumber = it.flight_number,
                         origin = it.origin,
                         destination = it.destination,
                         departureTime = it.departure_time,
+                        arrivalTime = it.arrival_time,
+                        eventDate = it.event_date,
                         seat = it.seat,
                         gate = it.gate,
                         bookingReference = it.booking_reference,
+                        barcode = it.barcode,
+                        subtitle = it.subtitle,
+                        logoText = it.logo_text,
+                        colorBackground = it.color_background,
+                        colorForeground = it.color_foreground,
+                        colorLabel = it.color_label,
+                        isVoided = it.is_voided,
+                        signatureValid = it.signature_valid,
                         isLocal = false
                     )
                 }
@@ -70,7 +80,7 @@ class DockWalletRepository(private val context: Context) {
         }
     }
 
-    suspend fun saveLocalPass(pass: BoardingPassEntity): Result<Unit> {
+    suspend fun saveLocalPass(pass: PassEntity): Result<Unit> {
         return try {
             dao.insert(pass)
             Result.Success(Unit)
@@ -79,7 +89,7 @@ class DockWalletRepository(private val context: Context) {
         }
     }
 
-    suspend fun deletePass(pass: BoardingPassEntity): Result<Unit> {
+    suspend fun deletePass(pass: PassEntity): Result<Unit> {
         return try {
             dao.delete(pass)
             Result.Success(Unit)
