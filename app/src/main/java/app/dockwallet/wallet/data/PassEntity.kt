@@ -1,6 +1,5 @@
 package app.dockwallet.wallet.data
 
-import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -13,13 +12,13 @@ data class PassEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
 
-    // ── Sync-Felder (NEU) ─────────────────────────────────────────────────────
-    val serverId: String? = null,        // UUID vom Server; null = noch nicht gesynct
-    val isLocal: Boolean = true,         // true = nur lokal, noch kein Push
-    val localFilePath: String? = null,   // Pfad zur .pkpass-Datei für Push
-    val updatedAt: String? = null,       // Server-Timestamp für Delta-Sync
+    // ── Sync-Felder ───────────────────────────────────────────────────────────
+    val serverId: String? = null,
+    val isLocal: Boolean = true,
+    val localFilePath: String? = null,
+    val updatedAt: String? = null,
 
-    // ── Pass-Daten (unverändert) ──────────────────────────────────────────────
+    // ── Pass-Daten ────────────────────────────────────────────────────────────
     val passType: String? = "boardingPass",
     val passengerName: String?,
     val flightNumber: String?,
@@ -40,4 +39,9 @@ data class PassEntity(
     val isVoided: Boolean = false,
     val signatureValid: Boolean = false,
     val createdAt: String? = null,
+
+    // ── Favorit ───────────────────────────────────────────────────────────────
+    val isFavorite: Boolean = false,
+    // true = User hat isFavorite lokal geändert, noch nicht zum Server gesynct
+    val favoriteChangedLocally: Boolean = false,
 )

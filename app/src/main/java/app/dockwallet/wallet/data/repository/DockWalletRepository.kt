@@ -5,12 +5,7 @@ import android.util.Base64
 import android.util.Log
 import app.dockwallet.wallet.data.AppDatabase
 import app.dockwallet.wallet.data.PassEntity
-import app.dockwallet.wallet.data.api.ApiClient
-import app.dockwallet.wallet.data.api.DockWalletApi
-import app.dockwallet.wallet.data.api.Pass
-import app.dockwallet.wallet.data.api.PushPassRequest
-import app.dockwallet.wallet.data.api.RegisterDeviceRequest
-import app.dockwallet.wallet.data.api.SyncDevice
+import app.dockwallet.wallet.data.api.*
 import app.dockwallet.wallet.data.api.TokenStore
 import kotlinx.coroutines.flow.Flow
 import java.io.File
@@ -40,14 +35,13 @@ class DockWalletRepository(private val context: Context) {
         return try {
             val response = api().login(mapOf("username" to username, "password" to password))
             if (response.isSuccessful) {
-                val token = response.body()?.token
-                    ?: return ApiResult.Error("Kein Token erhalten")
+                val token = response.body()?.token ?: return ApiResult.Error("Kein Token erhalten")
                 TokenStore.saveToken(context, token)
                 registerDevice()
                 ApiResult.Success(Unit)
             } else {
                 when (response.code()) {
-                    401 -> ApiResult.Error("Benutzername oder Passwort falsch")
+                    401  -> ApiResult.Error("Benutzername oder Passwort falsch")
                     else -> ApiResult.Error("Fehler: ${response.code()}")
                 }
             }
@@ -81,40 +75,49 @@ class DockWalletRepository(private val context: Context) {
         if (isLocalMode()) return ApiResult.Error("Kein Server verbunden")
 
         return try {
-            var pushed = 0
-            var pulled = 0
-            var deleted = 0
+            var pushed = 0; var pulled = 0; var deleted = 0
 
-            // ── 1. Pull zuerst (brauchen wir fuer Barcode-Abgleich) ───────────
-            val since = TokenStore.getLastSyncTime(context)
-            val pullResponse = api().syncPull(bearer(), since = since)
-
-            if (!pullResponse.isSuccessful) {
-                return ApiResult.Error("Pull fehlgeschlagen: ${pullResponse.code()}")
+            // ── 1. Favorit-Änderungen zuerst pushen ───────────────────────────
+            val pendingFavorites = dao.getPendingFavoriteChanges()
+            for (pass in pendingFavorites) {
+                val serverId = pass.serverId ?: continue
+                try {
+                    val response = api().setFavorite(
+                        bearer(), serverId, SetFavoriteRequest(pass.isFavorite)
+                    )
+                    if (response.isSuccessful) {
+                        dao.clearFavoriteChanged(serverId)
+                        Log.d(TAG, "Favorit gesynct: $serverId = ${pass.isFavorite}")
+                    } else {
+                        Log.w(TAG, "Favorit-Sync fehlgeschlagen: ${response.code()}")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Favorit-Sync Fehler für $serverId", e)
+                    // Nicht abbrechen — Rest des Syncs weitermachen
+                }
             }
 
-            val syncData = pullResponse.body()!!
+            // ── 2. Pull ───────────────────────────────────────────────────────
+            val since = TokenStore.getLastSyncTime(context)
+            val pullResponse = api().syncPull(bearer(), since = since)
+            if (!pullResponse.isSuccessful)
+                return ApiResult.Error("Pull fehlgeschlagen: ${pullResponse.code()}")
 
-            // Barcode → Server-ID Map fuer Duplikat-Erkennung
+            val syncData = pullResponse.body()!!
             val serverBarcodeMap = syncData.passes
                 .filter { it.barcode != null }
                 .associate { it.barcode!! to it.id }
-
-            // Bekannte Server-IDs VOR dem Push laden
             val knownServerIds = dao.getAllServerIds().toMutableSet()
 
-            // ── 2. Push: lokale Paesse ohne serverId ──────────────────────────
+            // ── 3. Push: lokale Pässe ohne serverId ───────────────────────────
             val localOnly = dao.getLocalOnlyPasses()
             for (local in localOnly) {
                 try {
                     val existingServerId = local.barcode?.let { serverBarcodeMap[it] }
                     if (existingServerId != null) {
-                        // Duplikat: nur verknuepfen, nicht hochladen
                         dao.linkToServer(local.id, existingServerId)
                         knownServerIds.add(existingServerId)
-                        Log.d(TAG, "Duplikat via Barcode: ${local.id} -> $existingServerId")
                     } else {
-                        // Neu: auf Server hochladen
                         val file = local.localFilePath?.let { File(it) }
                         if (file != null && file.exists()) {
                             val b64 = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
@@ -124,48 +127,48 @@ class DockWalletRepository(private val context: Context) {
                                 dao.linkToServer(local.id, serverPass.id)
                                 knownServerIds.add(serverPass.id)
                                 pushed++
-                            } else {
-                                Log.w(TAG, "Push fehlgeschlagen fuer ${local.id}: ${response.code()}")
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Push error fuer ${local.id}", e)
+                    Log.e(TAG, "Push error für ${local.id}", e)
                 }
             }
 
-            // ── 3. Pull-Ergebnisse in Room einspielen ─────────────────────────
+            // ── 4. Pull-Ergebnisse in Room einspielen ─────────────────────────
             for (serverPass in syncData.passes) {
                 if (serverPass.id in knownServerIds) {
                     dao.updateByServerId(
-                        serverId = serverPass.id,
-                        passType = serverPass.pass_type ?: "generic",
-                        passengerName = serverPass.passenger_name,
-                        flightNumber = serverPass.flight_number,
-                        origin = serverPass.origin,
-                        destination = serverPass.destination,
-                        departureTime = serverPass.departure_time,
-                        arrivalTime = serverPass.arrival_time,
-                        eventDate = serverPass.event_date,
-                        seat = serverPass.seat,
+                        serverId       = serverPass.id,
+                        passType       = serverPass.pass_type ?: "generic",
+                        passengerName  = serverPass.passenger_name,
+                        flightNumber   = serverPass.flight_number,
+                        origin         = serverPass.origin,
+                        destination    = serverPass.destination,
+                        departureTime  = serverPass.departure_time,
+                        arrivalTime    = serverPass.arrival_time,
+                        eventDate      = serverPass.event_date,
+                        seat           = serverPass.seat,
                         bookingReference = serverPass.booking_reference,
-                        barcode = serverPass.barcode,
-                        subtitle = serverPass.subtitle,
-                        logoText = serverPass.logo_text,
+                        barcode        = serverPass.barcode,
+                        subtitle       = serverPass.subtitle,
+                        logoText       = serverPass.logo_text,
                         colorBackground = serverPass.color_background,
                         colorForeground = serverPass.color_foreground,
-                        colorLabel = serverPass.color_label,
-                        isVoided = serverPass.is_voided,
+                        colorLabel     = serverPass.color_label,
+                        isVoided       = serverPass.is_voided,
                         signatureValid = serverPass.signature_valid,
-                        updatedAt = serverPass.updated_at,
+                        updatedAt      = serverPass.updated_at,
                     )
+                    // Favorit vom Server übernehmen (nur wenn kein lokaler Pending-Change)
+                    dao.updateFavoriteFromServer(serverPass.id, serverPass.is_favorite)
                 } else {
                     dao.insert(serverPass.toEntity())
                 }
                 pulled++
             }
 
-            // ── 4. Beim ersten Full-Sync: geloeschte Server-Paesse aufraeum ───
+            // ── 5. Beim ersten Full-Sync: veraltete Pässe aufräumen ───────────
             if (since == null) {
                 val serverIdSet = syncData.passes.map { it.id }.toSet()
                 val toDelete = dao.getAllServerIds().filter { it !in serverIdSet }
@@ -175,7 +178,7 @@ class DockWalletRepository(private val context: Context) {
                 }
             }
 
-            // ── 5. Timestamp speichern ────────────────────────────────────────
+            // ── 6. Timestamp speichern ────────────────────────────────────────
             TokenStore.saveLastSyncTime(context, syncData.server_time)
 
             ApiResult.Success(SyncSummary(pulled = pulled, pushed = pushed, deleted = deleted))
@@ -185,12 +188,11 @@ class DockWalletRepository(private val context: Context) {
         }
     }
 
-    suspend fun syncFromServer(): ApiResult<Unit> {
-        return when (val r = sync()) {
+    suspend fun syncFromServer(): ApiResult<Unit> =
+        when (val r = sync()) {
             is ApiResult.Success -> ApiResult.Success(Unit)
-            is ApiResult.Error -> ApiResult.Error(r.message)
+            is ApiResult.Error   -> ApiResult.Error(r.message)
         }
-    }
 
     // ── Pass lokal speichern ──────────────────────────────────────────────────
 
@@ -203,25 +205,22 @@ class DockWalletRepository(private val context: Context) {
         }
     }
 
-    // ── Pass loeschen (lokal + Server) ───────────────────────────────────────
+    // ── Pass löschen (lokal + Server) ────────────────────────────────────────
 
     suspend fun deletePass(pass: PassEntity): ApiResult<Unit> {
         return try {
             pass.serverId?.let { serverId ->
-                try {
-                    api().syncDelete(bearer(), serverId)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Server-Delete fehlgeschlagen fuer $serverId", e)
-                }
+                try { api().syncDelete(bearer(), serverId) }
+                catch (e: Exception) { Log.w(TAG, "Server-Delete fehlgeschlagen für $serverId", e) }
             }
             dao.delete(pass)
             ApiResult.Success(Unit)
         } catch (e: Exception) {
-            ApiResult.Error("Loeschen fehlgeschlagen: ${e.localizedMessage}")
+            ApiResult.Error("Löschen fehlgeschlagen: ${e.localizedMessage}")
         }
     }
 
-    // ── Geraete abrufen ───────────────────────────────────────────────────────
+    // ── Geräte abrufen ────────────────────────────────────────────────────────
 
     suspend fun getSyncDevices(): ApiResult<List<SyncDevice>> {
         return try {
@@ -243,31 +242,33 @@ class DockWalletRepository(private val context: Context) {
         }
     }
 
-    // ── Mapping: Pass (API) -> PassEntity (Room) ──────────────────────────────
+    // ── Mapping: Pass (API) → PassEntity (Room) ───────────────────────────────
 
     private fun Pass.toEntity() = PassEntity(
-        serverId = id,
-        isLocal = false,
-        passType = pass_type ?: "generic",
-        passengerName = passenger_name,
-        flightNumber = flight_number,
-        origin = origin,
-        destination = destination,
-        departureTime = departure_time,
-        arrivalTime = arrival_time,
-        eventDate = event_date,
-        seat = seat,
-        gate = gate,
+        serverId        = id,
+        isLocal         = false,
+        passType        = pass_type ?: "generic",
+        passengerName   = passenger_name,
+        flightNumber    = flight_number,
+        origin          = origin,
+        destination     = destination,
+        departureTime   = departure_time,
+        arrivalTime     = arrival_time,
+        eventDate       = event_date,
+        seat            = seat,
+        gate            = gate,
         bookingReference = booking_reference,
-        barcode = barcode,
-        subtitle = subtitle,
-        logoText = logo_text,
+        barcode         = barcode,
+        subtitle        = subtitle,
+        logoText        = logo_text,
         colorBackground = color_background,
         colorForeground = color_foreground,
-        colorLabel = color_label,
-        isVoided = is_voided,
-        signatureValid = signature_valid,
-        updatedAt = updated_at,
-        createdAt = created_at,
+        colorLabel      = color_label,
+        isVoided        = is_voided,
+        signatureValid  = signature_valid,
+        updatedAt       = updated_at,
+        createdAt       = created_at,
+        isFavorite      = is_favorite,
+        favoriteChangedLocally = false,
     )
 }

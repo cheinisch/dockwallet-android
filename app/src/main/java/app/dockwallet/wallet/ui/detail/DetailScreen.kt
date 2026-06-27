@@ -3,11 +3,13 @@ package app.dockwallet.wallet.ui.detail
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -26,29 +27,51 @@ import app.dockwallet.wallet.data.PassEntity
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 fun parseColor(hex: String?): Color? {
     if (hex == null) return null
     return try {
-        Color(android.graphics.Color.parseColor(hex))
-    } catch (e: Exception) {
-        null
-    }
+        val raw = hex.trim()
+        val rgbMatch = Regex("""rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)""").find(raw)
+        if (rgbMatch != null) {
+            val (r, g, b) = rgbMatch.destructured
+            Color(r.toInt(), g.toInt(), b.toInt())
+        } else {
+            Color(android.graphics.Color.parseColor(raw))
+        }
+    } catch (e: Exception) { null }
 }
 
+// Try formats in order, return first that works
 fun generateBarcode(content: String, format: BarcodeFormat, width: Int, height: Int): Bitmap? {
     return try {
         val matrix = MultiFormatWriter().encode(content, format, width, height)
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-        for (x in 0 until width) {
-            for (y in 0 until height) {
-                bmp.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-            }
-        }
+        for (x in 0 until width) for (y in 0 until height)
+            bmp.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         bmp
-    } catch (e: Exception) {
-        null
-    }
+    } catch (e: Exception) { null }
 }
+
+data class BarcodeResult(val bitmap: Bitmap, val format: BarcodeFormat)
+
+fun detectBarcode(content: String): BarcodeResult? {
+    // Try QR first (most common in pkpass), then PDF417 (boarding passes), then Code128
+    val candidates = listOf(
+        BarcodeFormat.QR_CODE   to (512 to 512),
+        BarcodeFormat.PDF_417   to (800 to 240),
+        BarcodeFormat.AZTEC     to (512 to 512),
+        BarcodeFormat.CODE_128  to (800 to 240),
+    )
+    for ((fmt, size) in candidates) {
+        val bmp = generateBarcode(content, fmt, size.first, size.second)
+        if (bmp != null) return BarcodeResult(bmp, fmt)
+    }
+    return null
+}
+
+// ── DetailScreen ──────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,269 +79,370 @@ fun DetailScreen(
     pass: PassEntity,
     onBack: () -> Unit
 ) {
-    val bgColor = parseColor(pass.colorBackground) ?: MaterialTheme.colorScheme.primary
-    val fgColor = parseColor(pass.colorForeground) ?: Color.White
-    val labelColor = parseColor(pass.colorLabel) ?: fgColor.copy(alpha = 0.7f)
+    val bgColor  = parseColor(pass.colorBackground) ?: Color(0xFF1C3A6B)
+    val fgColor  = parseColor(pass.colorForeground) ?: Color.White
+    val lblColor = parseColor(pass.colorLabel)      ?: fgColor.copy(alpha = 0.65f)
 
-    val bgLuminance = (0.299f * bgColor.red + 0.587f * bgColor.green + 0.114f * bgColor.blue)
-    val onBg = if (bgLuminance > 0.5f) Color.Black else Color.White
-    val onBgMuted = onBg.copy(alpha = 0.6f)
+    val barcodeResult = remember(pass.barcode) {
+        pass.barcode?.let { detectBarcode(it) }
+    }
 
-    val barcodeBitmap = remember(pass.barcode) {
-        pass.barcode?.let {
-            generateBarcode(it, BarcodeFormat.QR_CODE, 512, 512)
-                ?: generateBarcode(it, BarcodeFormat.PDF_417, 700, 200)
-                ?: generateBarcode(it, BarcodeFormat.CODE_128, 700, 200)
+    var showInfoSheet by remember { mutableStateOf(false) }
+
+    // ── Info Bottom Sheet ─────────────────────────────────────────────────────
+    if (showInfoSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showInfoSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+            containerColor = MaterialTheme.colorScheme.surface,
+            dragHandle = { BottomSheetDefaults.DragHandle() }
+        ) {
+            PassInfoSheet(pass = pass, barcodeResult = barcodeResult)
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Zurück")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = bgColor,
-                    navigationIconContentColor = fgColor
-                )
-            )
-        }
-    ) { paddingValues ->
+    // ── Main Screen ───────────────────────────────────────────────────────────
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
         ) {
-            // ── Pass Karte ───────────────────────────────────────────────
+            // Top bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Zurück",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+                // Info button top right
+                IconButton(
+                    onClick = { showInfoSheet = true },
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Karteninfos",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+            }
+
+            // ── Card ──────────────────────────────────────────────────────────
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(20.dp))
                     .background(bgColor)
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 24.dp)
+                    // Tap the card → open info sheet (like Apple Wallet)
+                    .clickable { showInfoSheet = true }
             ) {
+                // Header
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = pass.logoText ?: "",
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = fgColor
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    color = fgColor.copy(alpha = 0.15f), thickness = 0.5.dp
+                )
+                Spacer(Modifier.height(20.dp))
 
-                pass.passengerName?.let { name ->
-                    if (name.isNotBlank()) {
-                        Text(
-                            text = "Name",
-                            fontSize = 11.sp,
-                            color = labelColor,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = name,
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = fgColor,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
+                // Passenger name
+                pass.passengerName?.takeIf { it.isNotBlank() }?.let { name ->
+                    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                        Text("NAME", fontSize = 10.sp, color = lblColor, letterSpacing = 1.sp)
+                        Text(name, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = fgColor)
                     }
+                    Spacer(Modifier.height(20.dp))
                 }
 
-                pass.subtitle?.let {
-                    if (it.isNotBlank()) {
-                        Text(
-                            text = it,
-                            fontSize = 15.sp,
-                            color = fgColor,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-                }
-
+                // Boarding pass route
                 if (pass.passType == "boardingPass") {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = pass.origin ?: "???",
-                                fontSize = 42.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = fgColor
-                            )
-                            Text("Abflug", fontSize = 11.sp, color = labelColor)
+                        Column {
+                            Text("ABFLUG", fontSize = 10.sp, color = lblColor, letterSpacing = 1.sp)
+                            Text(pass.origin ?: "—", fontSize = 48.sp, fontWeight = FontWeight.Bold,
+                                color = fgColor, lineHeight = 50.sp)
                         }
-                        Icon(
-                            Icons.Default.Flight,
-                            contentDescription = null,
-                            tint = fgColor,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = pass.destination ?: "???",
-                                fontSize = 42.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = fgColor
-                            )
-                            Text("Ankunft", fontSize = 11.sp, color = labelColor)
+                        Icon(Icons.Default.Flight, null, tint = fgColor.copy(alpha = 0.7f),
+                            modifier = Modifier.size(28.dp))
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("ANKUNFT", fontSize = 10.sp, color = lblColor, letterSpacing = 1.sp)
+                            Text(pass.destination ?: "—", fontSize = 48.sp, fontWeight = FontWeight.Bold,
+                                color = fgColor, lineHeight = 50.sp)
                         }
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(20.dp))
                 }
 
-                pass.eventDate?.let {
-                    Text(
-                        text = it.replace("T", " ").take(16),
-                        fontSize = 14.sp,
-                        color = labelColor,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
+                // Subtitle
+                pass.subtitle?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, fontSize = 16.sp, color = fgColor,
+                        modifier = Modifier.padding(horizontal = 20.dp))
+                    Spacer(Modifier.height(12.dp))
                 }
 
-                HorizontalDivider(color = fgColor.copy(alpha = 0.2f))
-                Spacer(modifier = Modifier.height(16.dp))
-
+                // Fields grid
                 val fields = buildList {
-                    pass.flightNumber?.let { add("Flug" to it) }
-                    pass.departureTime?.let { add("Abflug" to it.replace("T", " ").take(16)) }
-                    pass.arrivalTime?.let { add("Ankunft" to it.replace("T", " ").take(16)) }
-                    pass.seat?.let { add("Sitz" to it) }
-                    pass.gate?.let { add("Gate" to it) }
-                    pass.bookingReference?.let { add("Buchung" to it) }
+                    pass.flightNumber?.let     { add("FLUG"    to it) }
+                    pass.departureTime?.let    { add("ABFLUG"  to it.replace("T", " ").take(16)) }
+                    pass.arrivalTime?.let      { add("ANKUNFT" to it.replace("T", " ").take(16)) }
+                    pass.seat?.let             { add("SITZ"    to it) }
+                    pass.gate?.let             { add("GATE"    to it) }
+                    pass.bookingReference?.let { add("BUCHUNG" to it) }
+                    pass.eventDate?.let        { add("DATUM"   to it.replace("T", " ").take(16)) }
                 }
 
                 if (fields.isNotEmpty()) {
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp),
+                        color = fgColor.copy(alpha = 0.15f), thickness = 0.5.dp)
+                    Spacer(Modifier.height(16.dp))
                     fields.chunked(2).forEach { row ->
-                        Row(modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .padding(bottom = 16.dp)) {
                             row.forEach { (label, value) ->
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(bottom = 12.dp)
-                                ) {
-                                    Text(
-                                        text = label.uppercase(),
-                                        fontSize = 10.sp,
-                                        color = labelColor,
-                                        fontWeight = FontWeight.Medium,
-                                        letterSpacing = 0.5.sp
-                                    )
-                                    Text(
-                                        text = value,
-                                        fontSize = 15.sp,
-                                        color = fgColor,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(label, fontSize = 10.sp, color = lblColor,
+                                        letterSpacing = 1.sp, fontWeight = FontWeight.Medium)
+                                    Text(value, fontSize = 16.sp, color = fgColor,
+                                        fontWeight = FontWeight.SemiBold)
                                 }
                             }
-                            if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
                 }
 
+                // Voided
                 if (pass.isVoided) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.Red.copy(alpha = 0.2f)
-                    ) {
-                        Text(
-                            text = "⚠ Dieser Pass ist ungültig",
-                            modifier = Modifier.padding(12.dp),
-                            color = Color.Red,
-                            fontWeight = FontWeight.Medium,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-
-            // ── QR Code / Barcode ────────────────────────────────────────
-            if (barcodeBitmap != null) {
-                Column(
-                    modifier = Modifier
+                    Spacer(Modifier.height(8.dp))
+                    Box(modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Red.copy(alpha = 0.25f))
+                        .padding(12.dp),
+                        contentAlignment = Alignment.Center) {
+                        Text("⚠  Dieser Pass ist ungültig", color = Color(0xFFFF6B6B),
+                            fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+
+                // Barcode
+                if (barcodeResult != null) {
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp),
+                        color = fgColor.copy(alpha = 0.15f), thickness = 0.5.dp)
+                    Spacer(Modifier.height(24.dp))
+                    Box(modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(16.dp))
                         .background(Color.White)
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(220.dp)
-                            .background(Color.White, RoundedCornerShape(12.dp))
-                            .padding(12.dp)
-                    ) {
+                        .padding(16.dp)) {
+                        val isLinear = barcodeResult.format in listOf(
+                            BarcodeFormat.PDF_417, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39)
                         Image(
-                            bitmap = barcodeBitmap.asImageBitmap(),
-                            contentDescription = "QR Code",
-                            modifier = Modifier.fillMaxSize(),
+                            bitmap = barcodeResult.bitmap.asImageBitmap(),
+                            contentDescription = "Barcode",
+                            modifier = if (isLinear)
+                                Modifier.width(260.dp).height(80.dp)
+                            else
+                                Modifier.size(200.dp),
                             contentScale = ContentScale.Fit
                         )
                     }
-                    pass.barcode?.let {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = it,
-                            fontSize = 12.sp,
-                            color = Color.Gray,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    // Format label
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = barcodeResult.format.name.replace("_", " "),
+                        fontSize = 10.sp,
+                        color = fgColor.copy(alpha = 0.4f),
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(Modifier.height(24.dp))
+                }
+
+                // Tap hint
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.ExpandMore, null,
+                        tint = fgColor.copy(alpha = 0.35f), modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Mehr Infos", fontSize = 11.sp, color = fgColor.copy(alpha = 0.35f))
                 }
             }
 
-            // ── Weitere Informationen ─────────────────────────────────────
-            Spacer(modifier = Modifier.height(8.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Weitere Informationen",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                pass.logoText?.let {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Text(
-                            text = it,
-                            modifier = Modifier.padding(14.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.navigationBarsPadding().height(32.dp))
         }
     }
+}
+
+// ── Info Bottom Sheet ─────────────────────────────────────────────────────────
+
+@Composable
+private fun PassInfoSheet(
+    pass: PassEntity,
+    barcodeResult: BarcodeResult?
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 32.dp)
+    ) {
+        // Title
+        Text(
+            text = pass.logoText ?: pass.subtitle ?: "Karteninfos",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Text(
+            text = passTypeLabel(pass.passType),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
+
+        // All info fields
+        val infoFields = buildList {
+            pass.passengerName?.let     { add("Name"           to it) }
+            pass.flightNumber?.let      { add("Flugnummer"     to it) }
+            pass.origin?.let            { add("Abflugort"      to it) }
+            pass.destination?.let       { add("Ankunftsort"    to it) }
+            pass.departureTime?.let     { add("Abflug"         to it.replace("T", " ").take(16)) }
+            pass.arrivalTime?.let       { add("Ankunft"        to it.replace("T", " ").take(16)) }
+            pass.seat?.let              { add("Sitzplatz"      to it) }
+            pass.gate?.let              { add("Gate"           to it) }
+            pass.bookingReference?.let  { add("Buchungscode"   to it) }
+            pass.subtitle?.let          { add("Beschreibung"   to it) }
+            pass.eventDate?.let         { add("Datum"          to it.replace("T", " ").take(16)) }
+            pass.createdAt?.let         { add("Hinzugefügt"    to it.take(10)) }
+            barcodeResult?.let          { add("Barcode-Format" to it.format.name.replace("_", " ")) }
+            if (pass.isVoided)          add("Status"           to "Ungültig / abgelaufen")
+        }
+
+        infoFields.forEachIndexed { index, (label, value) ->
+            InfoRow(label = label, value = value)
+            if (index < infoFields.lastIndex) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            }
+        }
+
+        // Barcode enlarged in sheet
+        if (barcodeResult != null && pass.barcode != null) {
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Barcode",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            val isLinear = barcodeResult.format in listOf(
+                BarcodeFormat.PDF_417, BarcodeFormat.CODE_128, BarcodeFormat.CODE_39)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White)
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = barcodeResult.bitmap.asImageBitmap(),
+                    contentDescription = "Barcode",
+                    modifier = if (isLinear)
+                        Modifier.fillMaxWidth().height(100.dp)
+                    else
+                        Modifier.size(240.dp),
+                    contentScale = ContentScale.Fit
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = pass.barcode!!,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.4f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(0.6f)
+        )
+    }
+}
+
+private fun passTypeLabel(type: String?) = when (type) {
+    "boardingPass" -> "Boarding Pass"
+    "eventTicket"  -> "Veranstaltungsticket"
+    "coupon"       -> "Coupon"
+    "storeCard"    -> "Kundenkarte"
+    else           -> "Pass"
 }

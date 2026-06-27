@@ -5,15 +5,12 @@ import retrofit2.http.*
 
 // ─── DTOs Login ───────────────────────────────────────────────────────────────
 
-data class LoginResponse(
-    val token: String,
-    val token_type: String
-)
+data class LoginResponse(val token: String, val token_type: String)
 
-// ─── DTOs Passes (bestehend, server-seitig) ───────────────────────────────────
+// ─── DTOs Passes ─────────────────────────────────────────────────────────────
 
 data class Pass(
-    val id: String,           // UUID (war Int, jetzt String — Server gibt UUID zurück)
+    val id: String,
     val pass_type: String = "boardingPass",
     val passenger_name: String?,
     val flight_number: String?,
@@ -35,6 +32,7 @@ data class Pass(
     val signature_valid: Boolean = false,
     val updated_at: String? = null,
     val created_at: String? = null,
+    val is_favorite: Boolean = false,   // NEU
 )
 
 // ─── DTOs Sync ───────────────────────────────────────────────────────────────
@@ -48,9 +46,9 @@ data class SyncPullResponse(
     val count: Int,
 )
 
-data class PushPassRequest(
-    val file: String? = null,       // base64 .pkpass
-)
+data class PushPassRequest(val file: String? = null)
+
+data class SetFavoriteRequest(val is_favorite: Boolean)   // NEU
 
 data class SyncDevice(
     val id: String,
@@ -69,25 +67,17 @@ data class SyncStatusResponse(
 
 interface DockWalletApi {
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
-
     @POST("api/auth/login")
-    suspend fun login(
-        @Body body: Map<String, String>
-    ): Response<LoginResponse>
-
-    // ── Passes (bestehend) ────────────────────────────────────────────────────
+    suspend fun login(@Body body: Map<String, String>): Response<LoginResponse>
 
     @GET("api/passes")
-    suspend fun getPasses(
-        @Header("Authorization") token: String
-    ): Response<List<Pass>>
+    suspend fun getPasses(@Header("Authorization") token: String): Response<List<Pass>>
 
     @Multipart
     @POST("api/passes/upload")
     suspend fun uploadPass(
         @Header("Authorization") token: String,
-        @Part("file") file: String   // base64
+        @Part("file") file: String
     ): Response<Pass>
 
     @DELETE("api/passes/{id}")
@@ -95,8 +85,6 @@ interface DockWalletApi {
         @Header("Authorization") token: String,
         @Path("id") id: String
     ): Response<Unit>
-
-    // ── Sync ──────────────────────────────────────────────────────────────────
 
     @POST("api/sync/register-device")
     suspend fun registerDevice(
@@ -122,15 +110,19 @@ interface DockWalletApi {
         @Path("id") id: String
     ): Response<Unit>
 
+    // NEU: Favorit setzen
+    @PATCH("api/sync/passes/{id}/favorite")
+    suspend fun setFavorite(
+        @Header("Authorization") token: String,
+        @Path("id") id: String,
+        @Body body: SetFavoriteRequest
+    ): Response<Unit>
+
     @GET("api/sync/status")
-    suspend fun syncStatus(
-        @Header("Authorization") token: String
-    ): Response<SyncStatusResponse>
+    suspend fun syncStatus(@Header("Authorization") token: String): Response<SyncStatusResponse>
 
     @GET("api/sync/devices")
-    suspend fun syncDevices(
-        @Header("Authorization") token: String
-    ): Response<List<SyncDevice>>
+    suspend fun syncDevices(@Header("Authorization") token: String): Response<List<SyncDevice>>
 
     @DELETE("api/sync/devices/{id}")
     suspend fun removeSyncDevice(

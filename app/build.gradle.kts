@@ -17,8 +17,8 @@ android {
         applicationId = "app.dockwallet.wallet"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.1.0"
+        versionCode = 6
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -79,6 +79,9 @@ dependencies {
     // Zxing
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("com.google.zxing:core:3.5.3")
+
+    // Storage
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
