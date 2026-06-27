@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [PassEntity::class],
-    version = 2,
+    version = 3,             // War 2, jetzt 3 wegen neuer Sync-Spalten
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -20,6 +20,7 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        // Bestehende Migration (unverändert)
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS boarding_passes")
@@ -51,6 +52,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Neue Migration: Sync-Felder hinzufügen
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Neue Spalten
+                db.execSQL("ALTER TABLE passes ADD COLUMN serverId TEXT")
+                db.execSQL("ALTER TABLE passes ADD COLUMN localFilePath TEXT")
+                db.execSQL("ALTER TABLE passes ADD COLUMN updatedAt TEXT")
+                db.execSQL("ALTER TABLE passes ADD COLUMN createdAt TEXT")
+
+                // isLocal war schon vorhanden (Boolean), bleibt erhalten
+                // Unique Index auf serverId für schnelles Lookup
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_passes_serverId ON passes(serverId)")
+
+                // Autoincrement: id war INT PRIMARY KEY ohne AUTOINCREMENT.
+                // Room generiert das korrekt über die Entity-Annotation.
+                // Bestehende Zeilen behalten ihre id, neue bekommen autoincrement.
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -58,7 +78,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "dockwallet.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }

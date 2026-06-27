@@ -6,18 +6,21 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.*
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import app.dockwallet.wallet.data.AppDatabase
+import app.dockwallet.wallet.data.PassEntity
 import app.dockwallet.wallet.data.PkpassParser
 import app.dockwallet.wallet.data.api.TokenStore
+import app.dockwallet.wallet.ui.about.AboutScreen
+import app.dockwallet.wallet.ui.detail.DetailScreen
 import app.dockwallet.wallet.ui.login.LoginScreen
 import app.dockwallet.wallet.ui.onboarding.OnboardingScreen
 import app.dockwallet.wallet.ui.passes.PassesScreen
 import app.dockwallet.wallet.ui.settings.SettingsScreen
-import app.dockwallet.wallet.ui.about.AboutScreen
 import app.dockwallet.wallet.ui.theme.DockWalletTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -40,6 +43,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             DockWalletTheme {
                 val navController = rememberNavController()
+                var selectedPass by remember { mutableStateOf<PassEntity?>(null) }
 
                 NavHost(navController = navController, startDestination = startDestination) {
 
@@ -69,7 +73,10 @@ class MainActivity : ComponentActivity() {
 
                     composable("passes") {
                         PassesScreen(
-                            onPassClick = { },
+                            onPassClick = { pass ->
+                                selectedPass = pass
+                                navController.navigate("detail")
+                            },
                             onLogout = {
                                 navController.navigate("login") {
                                     popUpTo("passes") { inclusive = true }
@@ -79,6 +86,15 @@ class MainActivity : ComponentActivity() {
                                 navController.navigate("settings")
                             }
                         )
+                    }
+
+                    composable("detail") {
+                        selectedPass?.let { pass ->
+                            DetailScreen(
+                                pass = pass,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                     }
 
                     composable("settings") {

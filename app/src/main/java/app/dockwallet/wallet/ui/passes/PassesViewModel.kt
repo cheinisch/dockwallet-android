@@ -17,6 +17,7 @@ data class PassesUiState(
     val isLoading: Boolean = false,
     val isSyncing: Boolean = false,
     val error: String? = null,
+    val syncMessage: String? = null,   // NEU: Sync-Ergebnis anzeigen
     val isLocalMode: Boolean = false
 )
 
@@ -34,9 +35,7 @@ class PassesViewModel(application: Application) : AndroidViewModel(application) 
             }
             .launchIn(viewModelScope)
 
-        _uiState.value = _uiState.value.copy(
-            isLocalMode = repository.isLocalMode()
-        )
+        _uiState.value = _uiState.value.copy(isLocalMode = repository.isLocalMode())
 
         if (!repository.isLocalMode()) {
             sync()
@@ -45,17 +44,19 @@ class PassesViewModel(application: Application) : AndroidViewModel(application) 
 
     fun sync() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSyncing = true, error = null)
+            _uiState.value = _uiState.value.copy(isSyncing = true, error = null, syncMessage = null)
             when (val result = repository.syncFromServer()) {
-                is Result.Success -> _uiState.value = _uiState.value.copy(
-                    isSyncing = false
-                )
-                is Result.Error -> _uiState.value = _uiState.value.copy(
+                is Result.Success -> _uiState.value = _uiState.value.copy(isSyncing = false)
+                is Result.Error   -> _uiState.value = _uiState.value.copy(
                     isSyncing = false,
                     error = result.message
                 )
             }
         }
+    }
+
+    fun dismissError() {
+        _uiState.value = _uiState.value.copy(error = null)
     }
 
     fun logout() = repository.logout()
