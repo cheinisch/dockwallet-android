@@ -20,7 +20,7 @@ data class PassEntity(
     val updatedAt: String? = null,       // Server-Timestamp für Delta-Sync
 
     // ── Pass-Daten (unverändert) ──────────────────────────────────────────────
-    val passType: String = "boardingPass",
+    val passType: String? = "boardingPass",
     val passengerName: String?,
     val flightNumber: String?,
     val origin: String?,

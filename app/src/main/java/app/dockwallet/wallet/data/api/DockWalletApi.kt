@@ -6,7 +6,7 @@ import retrofit2.http.*
 // ─── DTOs Login ───────────────────────────────────────────────────────────────
 
 data class LoginResponse(
-    val access_token: String,
+    val token: String,
     val token_type: String
 )
 

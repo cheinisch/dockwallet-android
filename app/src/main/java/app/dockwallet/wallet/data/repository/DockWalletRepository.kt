@@ -40,7 +40,7 @@ class DockWalletRepository(private val context: Context) {
         return try {
             val response = api().login(mapOf("username" to username, "password" to password))
             if (response.isSuccessful) {
-                val token = response.body()?.access_token
+                val token = response.body()?.token
                     ?: return ApiResult.Error("Kein Token erhalten")
                 TokenStore.saveToken(context, token)
                 registerDevice()
@@ -139,7 +139,7 @@ class DockWalletRepository(private val context: Context) {
                 if (serverPass.id in knownServerIds) {
                     dao.updateByServerId(
                         serverId = serverPass.id,
-                        passType = serverPass.pass_type,
+                        passType = serverPass.pass_type ?: "generic",
                         passengerName = serverPass.passenger_name,
                         flightNumber = serverPass.flight_number,
                         origin = serverPass.origin,
@@ -248,7 +248,7 @@ class DockWalletRepository(private val context: Context) {
     private fun Pass.toEntity() = PassEntity(
         serverId = id,
         isLocal = false,
-        passType = pass_type,
+        passType = pass_type ?: "generic",
         passengerName = passenger_name,
         flightNumber = flight_number,
         origin = origin,
