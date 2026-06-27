@@ -20,7 +20,7 @@ import app.dockwallet.wallet.data.AppDatabase
 import app.dockwallet.wallet.data.api.SyncDevice
 import app.dockwallet.wallet.data.api.TokenStore
 import app.dockwallet.wallet.data.repository.DockWalletRepository
-import app.dockwallet.wallet.data.repository.Result
+import app.dockwallet.wallet.data.repository.ApiResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -94,11 +94,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingDevices = true)
             when (val result = repository.getSyncDevices()) {
-                is Result.Success -> _uiState.value = _uiState.value.copy(
+                is ApiResult.Success -> _uiState.value = _uiState.value.copy(
                     devices = result.data,
                     isLoadingDevices = false
                 )
-                is Result.Error -> _uiState.value = _uiState.value.copy(
+                is ApiResult.Error -> _uiState.value = _uiState.value.copy(
                     isLoadingDevices = false,
                     deviceError = result.message
                 )
@@ -109,8 +109,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun removeDevice(deviceId: String) {
         viewModelScope.launch {
             when (val result = repository.removeSyncDevice(deviceId)) {
-                is Result.Success -> loadDevices()
-                is Result.Error -> _uiState.value = _uiState.value.copy(
+                is ApiResult.Success -> loadDevices()
+                is ApiResult.Error -> _uiState.value = _uiState.value.copy(
                     deviceError = result.message
                 )
             }

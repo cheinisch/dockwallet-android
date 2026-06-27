@@ -5,6 +5,7 @@ import android.net.Uri
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
 
 object PkpassParser {
 
@@ -30,13 +31,33 @@ object PkpassParser {
             }
             zip.close()
 
-            passJson?.let { parsePassJson(it) }
+            // Lokalen Dateipfad ermitteln (fuer spaeteres Push zum Server)
+            val localPath = resolveLocalPath(context, uri)
+
+            passJson?.let { parsePassJson(it, localPath) }
         } catch (e: Exception) {
             null
         }
     }
 
-    private fun parsePassJson(json: String): PassEntity {
+    private fun resolveLocalPath(context: Context, uri: Uri): String? {
+        return try {
+            // Bei file:// URIs direkt den Pfad nehmen
+            if (uri.scheme == "file") return uri.path
+
+            // Bei content:// URIs in den App-Cache kopieren
+            val fileName = "pass_${System.currentTimeMillis()}.pkpass"
+            val cacheFile = File(context.cacheDir, fileName)
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                cacheFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            cacheFile.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun parsePassJson(json: String, localFilePath: String?): PassEntity {
         val p = JSONObject(json)
 
         val passType = when {
@@ -84,7 +105,10 @@ object PkpassParser {
         val isBoardingPass = passType == "boardingPass"
 
         return PassEntity(
-            id = -(System.currentTimeMillis() % Int.MAX_VALUE).toInt(),
+            id = 0,                          // Room vergibt autoincrement ID
+            serverId = null,                 // noch nicht gesynct
+            isLocal = true,
+            localFilePath = localFilePath,   // fuer spaeteres Push
             passType = passType,
             passengerName = getField("passenger", "name", "passengerName") ?: primaryValue,
             flightNumber = if (isBoardingPass) getField("flightNumber", "flight") else null,
@@ -110,7 +134,6 @@ object PkpassParser {
             colorLabel = p.optString("labelColor").ifEmpty { null },
             isVoided = p.optBoolean("voided", false),
             signatureValid = false,
-            isLocal = true
         )
     }
 }

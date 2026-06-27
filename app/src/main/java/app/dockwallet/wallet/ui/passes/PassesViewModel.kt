@@ -5,7 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.dockwallet.wallet.data.PassEntity
 import app.dockwallet.wallet.data.repository.DockWalletRepository
-import app.dockwallet.wallet.data.repository.Result
+import app.dockwallet.wallet.data.repository.ApiResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -46,8 +46,8 @@ class PassesViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSyncing = true, error = null, syncMessage = null)
             when (val result = repository.syncFromServer()) {
-                is Result.Success -> _uiState.value = _uiState.value.copy(isSyncing = false)
-                is Result.Error   -> _uiState.value = _uiState.value.copy(
+                is ApiResult.Success -> _uiState.value = _uiState.value.copy(isSyncing = false)
+                is ApiResult.Error   -> _uiState.value = _uiState.value.copy(
                     isSyncing = false,
                     error = result.message
                 )

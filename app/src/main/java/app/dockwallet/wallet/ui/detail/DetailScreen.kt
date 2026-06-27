@@ -60,7 +60,6 @@ fun DetailScreen(
     val fgColor = parseColor(pass.colorForeground) ?: Color.White
     val labelColor = parseColor(pass.colorLabel) ?: fgColor.copy(alpha = 0.7f)
 
-    // Helligkeit prüfen für Text-Farbe
     val bgLuminance = (0.299f * bgColor.red + 0.587f * bgColor.green + 0.114f * bgColor.blue)
     val onBg = if (bgLuminance > 0.5f) Color.Black else Color.White
     val onBgMuted = onBg.copy(alpha = 0.6f)
@@ -103,26 +102,21 @@ fun DetailScreen(
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 24.dp)
             ) {
-                // Header Zeile: Logo + Header Felder
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Logo Text / Organisation
                     Text(
                         text = pass.logoText ?: "",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = fgColor
                     )
-                    // Header Felder (z.B. Parkreihe)
-                    // Für diesen Pass: nichts, da Parkreihe "-"
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Primary Fields
                 pass.passengerName?.let { name ->
                     if (name.isNotBlank()) {
                         Text(
@@ -144,7 +138,6 @@ fun DetailScreen(
                     }
                 }
 
-                // Subtitle
                 pass.subtitle?.let {
                     if (it.isNotBlank()) {
                         Text(
@@ -158,7 +151,6 @@ fun DetailScreen(
                     }
                 }
 
-                // Boarding Pass spezifisch: Route
                 if (pass.passType == "boardingPass") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -193,7 +185,6 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // Event Date
                 pass.eventDate?.let {
                     Text(
                         text = it.replace("T", " ").take(16),
@@ -205,11 +196,9 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // Trennlinie
                 HorizontalDivider(color = fgColor.copy(alpha = 0.2f))
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Secondary + Auxiliary Felder als Grid
                 val fields = buildList {
                     pass.flightNumber?.let { add("Flug" to it) }
                     pass.departureTime?.let { add("Abflug" to it.replace("T", " ").take(16)) }
@@ -243,13 +232,11 @@ fun DetailScreen(
                                     )
                                 }
                             }
-                            // Lücke auffüllen wenn nur 1 Element in der Reihe
                             if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }
 
-                // Voided Banner
                 if (pass.isVoided) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Surface(
@@ -302,8 +289,7 @@ fun DetailScreen(
                 }
             }
 
-            // ── Back Fields ──────────────────────────────────────────────
-            // Zeigt zusätzliche Infos aus dem Pass (backFields)
+            // ── Weitere Informationen ─────────────────────────────────────
             Spacer(modifier = Modifier.height(8.dp))
             Column(
                 modifier = Modifier
@@ -316,7 +302,6 @@ fun DetailScreen(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-                // Logo Text als Beschreibung
                 pass.logoText?.let {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),

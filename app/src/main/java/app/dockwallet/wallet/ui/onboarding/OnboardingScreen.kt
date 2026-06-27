@@ -19,7 +19,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.dockwallet.wallet.data.api.TokenStore
 import app.dockwallet.wallet.data.repository.DockWalletRepository
-import app.dockwallet.wallet.data.repository.Result
+import app.dockwallet.wallet.data.repository.ApiResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -64,11 +64,11 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             val url = if (state.serverUrl.endsWith("/")) state.serverUrl else "${state.serverUrl}/"
             TokenStore.saveServerUrl(getApplication(), url)
             when (val result = repository.login(state.username, state.password)) {
-                is Result.Success -> {
+                is ApiResult.Success -> {
                     TokenStore.saveOnboardingDone(getApplication())
                     _uiState.value = _uiState.value.copy(isLoading = false, isDone = true)
                 }
-                is Result.Error -> _uiState.value = _uiState.value.copy(
+                is ApiResult.Error -> _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = result.message
                 )

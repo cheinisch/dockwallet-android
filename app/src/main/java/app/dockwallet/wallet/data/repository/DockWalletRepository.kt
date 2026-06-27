@@ -17,9 +17,9 @@ import java.io.File
 
 private const val TAG = "DockWalletRepository"
 
-sealed class Result<out T> {
-    data class Success<T>(val data: T) : Result<T>()
-    data class Error(val message: String) : Result<Nothing>()
+sealed class ApiResult<out T> {
+    data class Success<T>(val data: T) : ApiResult<T>()
+    data class Error(val message: String) : ApiResult<Nothing>()
 }
 
 data class SyncSummary(val pulled: Int, val pushed: Int, val deleted: Int)
@@ -36,24 +36,23 @@ class DockWalletRepository(private val context: Context) {
 
     // ── Login ─────────────────────────────────────────────────────────────────
 
-    suspend fun login(username: String, password: String): Result<Unit> {
+    suspend fun login(username: String, password: String): ApiResult<Unit> {
         return try {
             val response = api().login(mapOf("username" to username, "password" to password))
             if (response.isSuccessful) {
                 val token = response.body()?.access_token
-                    ?: return Result.Error("Kein Token erhalten")
+                    ?: return ApiResult.Error("Kein Token erhalten")
                 TokenStore.saveToken(context, token)
-                // Gerät direkt nach Login registrieren
                 registerDevice()
-                Result.Success(Unit)
+                ApiResult.Success(Unit)
             } else {
                 when (response.code()) {
-                    401 -> Result.Error("Benutzername oder Passwort falsch")
-                    else -> Result.Error("Fehler: ${response.code()}")
+                    401 -> ApiResult.Error("Benutzername oder Passwort falsch")
+                    else -> ApiResult.Error("Fehler: ${response.code()}")
                 }
             }
         } catch (e: Exception) {
-            Result.Error("Verbindung fehlgeschlagen: ${e.localizedMessage}")
+            ApiResult.Error("Verbindung fehlgeschlagen: ${e.localizedMessage}")
         }
     }
 
@@ -64,53 +63,56 @@ class DockWalletRepository(private val context: Context) {
 
     // ── Gerät registrieren ────────────────────────────────────────────────────
 
-    suspend fun registerDevice(): Result<Unit> {
+    suspend fun registerDevice(): ApiResult<Unit> {
         return try {
             val deviceName = TokenStore.getDeviceName(context)
             val response = api().registerDevice(bearer(), RegisterDeviceRequest(deviceName))
-            if (response.isSuccessful) Result.Success(Unit)
-            else Result.Error("Geräteregistrierung fehlgeschlagen: ${response.code()}")
+            if (response.isSuccessful) ApiResult.Success(Unit)
+            else ApiResult.Error("Geraeteregistrierung fehlgeschlagen: ${response.code()}")
         } catch (e: Exception) {
             Log.w(TAG, "registerDevice failed (non-critical)", e)
-            Result.Success(Unit) // Non-critical — Sync läuft auch ohne
+            ApiResult.Success(Unit)
         }
     }
 
     // ── Bidirektionaler Sync ──────────────────────────────────────────────────
 
-    suspend fun sync(): Result<SyncSummary> {
-        if (isLocalMode()) return Result.Error("Kein Server verbunden")
+    suspend fun sync(): ApiResult<SyncSummary> {
+        if (isLocalMode()) return ApiResult.Error("Kein Server verbunden")
 
         return try {
             var pushed = 0
             var pulled = 0
             var deleted = 0
 
-            // ── 1. Pull zuerst holen (brauchen wir für Barcode-Abgleich) ─────
+            // ── 1. Pull zuerst (brauchen wir fuer Barcode-Abgleich) ───────────
             val since = TokenStore.getLastSyncTime(context)
             val pullResponse = api().syncPull(bearer(), since = since)
 
             if (!pullResponse.isSuccessful) {
-                return Result.Error("Pull fehlgeschlagen: ${pullResponse.code()}")
+                return ApiResult.Error("Pull fehlgeschlagen: ${pullResponse.code()}")
             }
 
             val syncData = pullResponse.body()!!
 
-            // Barcode → Server-ID Map für Duplikat-Erkennung
+            // Barcode → Server-ID Map fuer Duplikat-Erkennung
             val serverBarcodeMap = syncData.passes
                 .filter { it.barcode != null }
                 .associate { it.barcode!! to it.id }
 
-            // ── 2. Push: lokale Pässe ohne serverId ───────────────────────────
+            // Bekannte Server-IDs VOR dem Push laden
+            val knownServerIds = dao.getAllServerIds().toMutableSet()
+
+            // ── 2. Push: lokale Paesse ohne serverId ──────────────────────────
             val localOnly = dao.getLocalOnlyPasses()
             for (local in localOnly) {
                 try {
-                    // Prüfen ob Pass mit gleichem Barcode bereits auf Server existiert
                     val existingServerId = local.barcode?.let { serverBarcodeMap[it] }
                     if (existingServerId != null) {
-                        // Duplikat: nur verknüpfen, nicht hochladen
+                        // Duplikat: nur verknuepfen, nicht hochladen
                         dao.linkToServer(local.id, existingServerId)
-                        Log.d(TAG, "Duplikat erkannt via Barcode, verknüpft: ${local.id} → $existingServerId")
+                        knownServerIds.add(existingServerId)
+                        Log.d(TAG, "Duplikat via Barcode: ${local.id} -> $existingServerId")
                     } else {
                         // Neu: auf Server hochladen
                         val file = local.localFilePath?.let { File(it) }
@@ -120,22 +122,21 @@ class DockWalletRepository(private val context: Context) {
                             if (response.isSuccessful) {
                                 val serverPass = response.body()!!
                                 dao.linkToServer(local.id, serverPass.id)
+                                knownServerIds.add(serverPass.id)
                                 pushed++
                             } else {
-                                Log.w(TAG, "Push fehlgeschlagen für ${local.id}: ${response.code()}")
+                                Log.w(TAG, "Push fehlgeschlagen fuer ${local.id}: ${response.code()}")
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Push error für ${local.id}", e)
+                    Log.e(TAG, "Push error fuer ${local.id}", e)
                 }
             }
-            // ── 3. Pull-Ergebnisse in Room einspielen ─────────────────────────
-            val knownServerIds = dao.getAllServerIds().toSet()
 
+            // ── 3. Pull-Ergebnisse in Room einspielen ─────────────────────────
             for (serverPass in syncData.passes) {
                 if (serverPass.id in knownServerIds) {
-                    // Update bestehenden Eintrag
                     dao.updateByServerId(
                         serverId = serverPass.id,
                         passType = serverPass.pass_type,
@@ -159,13 +160,12 @@ class DockWalletRepository(private val context: Context) {
                         updatedAt = serverPass.updated_at,
                     )
                 } else {
-                    // Neu einfügen
                     dao.insert(serverPass.toEntity())
                 }
                 pulled++
             }
 
-            // ── 3. Beim ersten Full-Sync: gelöschte Server-Pässe aufräumen ────
+            // ── 4. Beim ersten Full-Sync: geloeschte Server-Paesse aufraeum ───
             if (since == null) {
                 val serverIdSet = syncData.passes.map { it.id }.toSet()
                 val toDelete = dao.getAllServerIds().filter { it !in serverIdSet }
@@ -175,78 +175,75 @@ class DockWalletRepository(private val context: Context) {
                 }
             }
 
-            // ── 4. Timestamp speichern ────────────────────────────────────────
+            // ── 5. Timestamp speichern ────────────────────────────────────────
             TokenStore.saveLastSyncTime(context, syncData.server_time)
 
-            Result.Success(SyncSummary(pulled = pulled, pushed = pushed, deleted = deleted))
+            ApiResult.Success(SyncSummary(pulled = pulled, pushed = pushed, deleted = deleted))
         } catch (e: Exception) {
             Log.e(TAG, "Sync failed", e)
-            Result.Error(e.message ?: "Unbekannter Fehler")
+            ApiResult.Error(e.message ?: "Unbekannter Fehler")
         }
     }
 
-    // Alter Name, leitet jetzt auf sync() weiter (für Kompatibilität mit PassesViewModel)
-    suspend fun syncFromServer(): Result<Unit> {
+    suspend fun syncFromServer(): ApiResult<Unit> {
         return when (val r = sync()) {
-            is Result.Success -> Result.Success(Unit)
-            is Result.Error -> Result.Error(r.message)
+            is ApiResult.Success -> ApiResult.Success(Unit)
+            is ApiResult.Error -> ApiResult.Error(r.message)
         }
     }
 
     // ── Pass lokal speichern ──────────────────────────────────────────────────
 
-    suspend fun saveLocalPass(pass: PassEntity): Result<Unit> {
+    suspend fun saveLocalPass(pass: PassEntity): ApiResult<Unit> {
         return try {
             dao.insert(pass)
-            Result.Success(Unit)
+            ApiResult.Success(Unit)
         } catch (e: Exception) {
-            Result.Error("Speichern fehlgeschlagen: ${e.localizedMessage}")
+            ApiResult.Error("Speichern fehlgeschlagen: ${e.localizedMessage}")
         }
     }
 
-    // ── Pass löschen (lokal + Server) ────────────────────────────────────────
+    // ── Pass loeschen (lokal + Server) ───────────────────────────────────────
 
-    suspend fun deletePass(pass: PassEntity): Result<Unit> {
+    suspend fun deletePass(pass: PassEntity): ApiResult<Unit> {
         return try {
-            // Wenn der Pass auf dem Server liegt → dort auch löschen
             pass.serverId?.let { serverId ->
                 try {
                     api().syncDelete(bearer(), serverId)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Server-Delete fehlgeschlagen für $serverId", e)
-                    // Lokal trotzdem löschen
+                    Log.w(TAG, "Server-Delete fehlgeschlagen fuer $serverId", e)
                 }
             }
             dao.delete(pass)
-            Result.Success(Unit)
+            ApiResult.Success(Unit)
         } catch (e: Exception) {
-            Result.Error("Löschen fehlgeschlagen: ${e.localizedMessage}")
+            ApiResult.Error("Loeschen fehlgeschlagen: ${e.localizedMessage}")
         }
     }
 
-    // ── Geräte abrufen ────────────────────────────────────────────────────────
+    // ── Geraete abrufen ───────────────────────────────────────────────────────
 
-    suspend fun getSyncDevices(): Result<List<SyncDevice>> {
+    suspend fun getSyncDevices(): ApiResult<List<SyncDevice>> {
         return try {
             val response = api().syncDevices(bearer())
-            if (response.isSuccessful) Result.Success(response.body() ?: emptyList())
-            else Result.Error("HTTP ${response.code()}")
+            if (response.isSuccessful) ApiResult.Success(response.body() ?: emptyList())
+            else ApiResult.Error("HTTP ${response.code()}")
         } catch (e: Exception) {
-            Result.Error(e.message ?: "Fehler")
+            ApiResult.Error(e.message ?: "Fehler")
         }
     }
 
-    suspend fun removeSyncDevice(deviceId: String): Result<Unit> {
+    suspend fun removeSyncDevice(deviceId: String): ApiResult<Unit> {
         return try {
             val response = api().removeSyncDevice(bearer(), deviceId)
-            if (response.isSuccessful) Result.Success(Unit)
-            else Result.Error("HTTP ${response.code()}")
+            if (response.isSuccessful) ApiResult.Success(Unit)
+            else ApiResult.Error("HTTP ${response.code()}")
         } catch (e: Exception) {
-            Result.Error(e.message ?: "Fehler")
+            ApiResult.Error(e.message ?: "Fehler")
         }
     }
 
-    // ── Mapping: Pass (API) → PassEntity (Room) ───────────────────────────────
+    // ── Mapping: Pass (API) -> PassEntity (Room) ──────────────────────────────
 
     private fun Pass.toEntity() = PassEntity(
         serverId = id,

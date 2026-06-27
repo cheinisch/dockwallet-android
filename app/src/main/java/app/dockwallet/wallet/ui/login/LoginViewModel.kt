@@ -3,8 +3,8 @@ package app.dockwallet.wallet.ui.login
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import app.dockwallet.wallet.data.repository.ApiResult
 import app.dockwallet.wallet.data.repository.DockWalletRepository
-import app.dockwallet.wallet.data.repository.Result
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -41,11 +41,11 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = state.copy(isLoading = true, error = null)
             when (val result = repository.login(state.username, state.password)) {
-                is Result.Success -> _uiState.value = _uiState.value.copy(
+                is ApiResult.Success -> _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     isSuccess = true
                 )
-                is Result.Error -> _uiState.value = _uiState.value.copy(
+                is ApiResult.Error -> _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = result.message
                 )
